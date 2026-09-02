@@ -16,6 +16,7 @@ import { useDoc } from './hooks/useDoc'
 import { guessCategory } from './lib/categories'
 import Login from './components/Login'
 import AddItemBar from './components/AddItemBar'
+import ShoppingSignalBar from './components/ShoppingSignalBar'
 import ShoppingList from './components/ShoppingList'
 import Pantry from './components/Pantry'
 import PantryItemModal from './components/PantryItemModal'
@@ -113,6 +114,7 @@ function Home() {
       </header>
 
       {tab === 'list' && <AddItemBar history={history} onAdd={handleAdd} />}
+      {tab === 'list' && <ShoppingSignalBar />}
 
       {tab === 'list' && (
         <ShoppingList

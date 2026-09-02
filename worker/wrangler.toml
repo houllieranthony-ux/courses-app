@@ -1,0 +1,11 @@
+name = "courses-app-notify"
+main = "index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+# Comma-separated list of origins allowed to call this Worker.
+ALLOWED_ORIGINS = "https://courses-familiales.web.app,http://localhost:5173"
+
+# Secret (not committed): set with
+#   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON
+# Paste the full content of the Firebase service account JSON file.
