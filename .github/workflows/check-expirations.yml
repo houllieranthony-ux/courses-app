@@ -1,0 +1,26 @@
+name: Vérification des dates de péremption
+
+on:
+  schedule:
+    # 08:00 heure de Paris (07:00 UTC en été, 08:00 UTC en hiver — on prend 7h
+    # UTC pour rester à l'heure quel que soit le changement d'heure).
+    - cron: '0 7 * * *'
+  workflow_dispatch: {} # pour tester manuellement depuis l'onglet Actions
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: node scripts/check-expirations.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          HOUSEHOLD_ID: ${{ vars.HOUSEHOLD_ID }}
