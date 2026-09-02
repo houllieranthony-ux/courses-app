@@ -23,10 +23,14 @@ dist-ssr
 *.sln
 *.sw?
 
-# Firebase config (generated from .env, keep .env private even though these
-# values aren't secret) and the service account key for the GitHub Action.
+# Firebase config (keep .env private even though these values aren't secret)
+# and the service account key (downloaded for GitHub Actions / the Worker —
+# never commit it, wherever it happens to land).
 .env
-public/firebase-config.json
 scripts/service-account.json
+*firebase-adminsdk*.json
 dev-dist
 .firebase
+
+# Generated from scripts/firebase-messaging-sw.template.js + .env at build time
+public/firebase-messaging-sw.js

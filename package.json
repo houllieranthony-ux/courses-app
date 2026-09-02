@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/generate-firebase-config.mjs",
+    "predev": "node scripts/generate-sw.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/generate-firebase-config.mjs",
+    "prebuild": "node scripts/generate-sw.mjs",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"

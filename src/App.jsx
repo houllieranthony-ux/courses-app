@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   addDoc,
   collection,
@@ -14,6 +14,7 @@ import { useAuth } from './context/AuthContext'
 import { useCollection } from './hooks/useCollection'
 import { useDoc } from './hooks/useDoc'
 import { guessCategory } from './lib/categories'
+import { listenForegroundMessages } from './push'
 import Login from './components/Login'
 import AddItemBar from './components/AddItemBar'
 import ShoppingSignalBar from './components/ShoppingSignalBar'
@@ -45,6 +46,20 @@ function SplashScreen() {
 function Home() {
   const [tab, setTab] = useState('list')
   const [pendingPantryItem, setPendingPantryItem] = useState(null)
+  const [toast, setToast] = useState(null)
+
+  useEffect(() => {
+    let unsubscribe = () => {}
+    listenForegroundMessages((payload) => {
+      const { title, body } = payload.notification || {}
+      if (!title && !body) return
+      setToast({ title, body })
+      setTimeout(() => setToast(null), 6000)
+    }).then((unsub) => {
+      unsubscribe = unsub
+    })
+    return () => unsubscribe()
+  }, [])
 
   const { docs: shoppingList } = useCollection(`households/${HOUSEHOLD_ID}/shoppingList`)
   const { docs: pantry } = useCollection(`households/${HOUSEHOLD_ID}/pantry`)
@@ -107,6 +122,13 @@ function Home() {
 
   return (
     <div className="min-h-dvh flex flex-col max-w-lg mx-auto bg-slate-50 dark:bg-slate-900">
+      {toast && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 max-w-[90vw] bg-slate-900 text-white rounded-xl shadow-lg px-4 py-3">
+          {toast.title && <p className="font-medium text-sm">{toast.title}</p>}
+          {toast.body && <p className="text-sm text-slate-200">{toast.body}</p>}
+        </div>
+      )}
+
       <header className="px-4 pt-4 pb-1">
         <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
           {TABS.find((t) => t.key === tab).icon} {TABS.find((t) => t.key === tab).label}

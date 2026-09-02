@@ -1,6 +1,10 @@
-// Writes public/firebase-config.json from .env, so the service worker (which
-// cannot read import.meta.env) can fetch the same public Firebase config the
-// app itself uses. Runs automatically before `dev` and `build`.
+// Generates public/firebase-messaging-sw.js from the template, with the
+// Firebase config (read from .env) inlined directly into the script. A
+// service worker can't read import.meta.env, and fetching the config
+// asynchronously at startup created a race: an incoming push could arrive
+// before the fetch resolved and the background-message listener was
+// registered, silently dropping the notification. Inlining removes that gap
+// entirely. Runs automatically before `dev` and `build`.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -28,5 +32,8 @@ const config = {
   appId: env.VITE_FIREBASE_APP_ID || '',
 }
 
-writeFileSync(path.join(root, 'public', 'firebase-config.json'), JSON.stringify(config, null, 2))
-console.log('public/firebase-config.json généré depuis .env')
+const template = readFileSync(path.join(root, 'scripts', 'firebase-messaging-sw.template.js'), 'utf8')
+const sw = template.replace('__FIREBASE_CONFIG__', JSON.stringify(config))
+
+writeFileSync(path.join(root, 'public', 'firebase-messaging-sw.js'), sw)
+console.log('public/firebase-messaging-sw.js généré depuis .env')
