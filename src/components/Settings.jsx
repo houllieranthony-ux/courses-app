@@ -41,13 +41,13 @@ export default function Settings({ defaultOffsets }) {
             {(pushStatus === 'default' || pushStatus === 'no-token') &&
               'Active les notifications pour être prévenu des dates de péremption, même app fermée.'}
           </p>
-          {pushStatus !== 'granted' && pushStatus !== 'unsupported' && (
+          {pushStatus !== 'unsupported' && (
             <button
               onClick={handleEnablePush}
               disabled={busy}
               className="rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white text-sm font-medium px-4 py-2.5"
             >
-              {busy ? 'Activation…' : 'Activer les notifications'}
+              {busy ? 'Activation…' : pushStatus === 'granted' ? 'Réactiver / resynchroniser' : 'Activer les notifications'}
             </button>
           )}
           {pushStatus === 'granted' && (
