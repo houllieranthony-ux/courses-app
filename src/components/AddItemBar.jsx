@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { searchProducts, lookupBarcode } from '../lib/openFoodFacts'
+import { searchStaples } from '../lib/staples'
 import { categoryMeta, guessCategory } from '../lib/categories'
 import BarcodeScanner from './BarcodeScanner'
 
 /**
- * Search bar with live suggestions (household history first, then Open Food
- * Facts), free-text entry, and a barcode scan shortcut.
+ * Search bar with live suggestions — household history first, then the
+ * built-in list of common staples (instant, works offline), then Open Food
+ * Facts for branded/packaged products — plus free-text entry and a barcode
+ * scan shortcut.
  */
 export default function AddItemBar({ history, onAdd }) {
   const [text, setText] = useState('')
@@ -19,13 +22,9 @@ export default function AddItemBar({ history, onAdd }) {
   useEffect(() => {
     const query = text.trim().toLowerCase()
     setNotFound(false)
-    if (query.length < 2) {
-      setSuggestions(historyMatches(history, query))
-      return
-    }
-
-    const historyResults = historyMatches(history, query)
-    setSuggestions(historyResults)
+    const localResults = localMatches(history, query)
+    setSuggestions(localResults)
+    if (query.length < 2) return
 
     const timeout = setTimeout(async () => {
       abortRef.current?.abort()
@@ -33,9 +32,9 @@ export default function AddItemBar({ history, onAdd }) {
       abortRef.current = controller
       try {
         const remote = await searchProducts(query, { signal: controller.signal })
-        setSuggestions(mergeSuggestions(historyResults, remote))
+        setSuggestions(mergeSuggestions(localResults, remote))
       } catch {
-        // ignore aborted/failed lookups, history results still shown
+        // ignore aborted/failed lookups, local results still shown
       }
     }, 300)
 
@@ -145,10 +144,25 @@ function historyMatches(history, query) {
     .map((h) => ({ ...h, fromHistory: true }))
 }
 
-function mergeSuggestions(historyResults, remote) {
+// Instant, offline suggestions: what you've already bought before, then the
+// built-in staples list (fruit, veg, pantry basics — the things Open Food
+// Facts' barcode-only database mostly doesn't have).
+function localMatches(history, query) {
+  const historyResults = historyMatches(history, query)
+  if (!query) return historyResults
+
   const seen = new Set(historyResults.map((h) => h.name.toLowerCase()))
+  const staples = searchStaples(query)
+    .filter((s) => !seen.has(s.name.toLowerCase()))
+    .slice(0, 6)
+
+  return [...historyResults, ...staples].slice(0, 8)
+}
+
+function mergeSuggestions(localResults, remote) {
+  const seen = new Set(localResults.map((h) => h.name.toLowerCase()))
   const remoteFiltered = remote
     .filter((r) => !seen.has(r.name.toLowerCase()))
     .map((r) => ({ ...r, category: r.category || guessCategory(r) }))
-  return [...historyResults, ...remoteFiltered].slice(0, 8)
+  return [...localResults, ...remoteFiltered].slice(0, 8)
 }
