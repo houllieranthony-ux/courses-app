@@ -54,8 +54,9 @@ const SEARCH_FIELDS = 'code,product_name,product_name_fr,brands,image_front_smal
 
 // Open Food Facts' newer search engine (search-a-licious). Unlike the legacy
 // cgi/search.pl, it supports proper structured filters, which is what lets us
-// restrict results to products actually sold in France.
-async function runSearch(query, { signal, franceOnly, pageSize }) {
+// restrict results to products actually sold in France. Only the food database
+// has this newer engine; beauty/products still use the legacy one below.
+async function searchFood(query, { signal, franceOnly, pageSize }) {
   const url = new URL('https://search.openfoodfacts.org/search')
   const q = franceOnly ? `${query} countries_tags:"en:france"` : query
   url.searchParams.set('q', q)
@@ -71,24 +72,52 @@ async function runSearch(query, { signal, franceOnly, pageSize }) {
   return (data.hits || []).map((p) => normalizeProduct(p, 'food')).filter(Boolean)
 }
 
+// Legacy search endpoint, used for the beauty/hygiene and general "products"
+// (household, non-food) databases, which don't have the newer search engine.
+async function searchLegacy(query, { signal, host, kind, pageSize }) {
+  const url = new URL(`https://${host}/cgi/search.pl`)
+  url.searchParams.set('search_terms', query)
+  url.searchParams.set('search_simple', '1')
+  url.searchParams.set('action', 'process')
+  url.searchParams.set('json', '1')
+  url.searchParams.set('page_size', String(pageSize))
+  url.searchParams.set('fields', 'product_name,brands,image_front_small_url,categories_tags,code')
+
+  const res = await fetch(url, { signal })
+  if (!res.ok) return []
+  const data = await res.json()
+  return (data.products || []).map((p) => normalizeProduct(p, kind)).filter(Boolean)
+}
+
+function dedupe(products) {
+  return products.filter(
+    (p, i, arr) => arr.findIndex((x) => x.name.toLowerCase() === p.name.toLowerCase()) === i,
+  )
+}
+
 /**
- * Free-text search for autocomplete suggestions, food database only (by far the
- * most useful for a grocery list, and the fastest of the three). Prioritizes
- * products sold in France; falls back to the wider database only if that's not
- * enough results, so a couple in France doesn't drown in US-only products.
+ * Free-text search for autocomplete suggestions across food, hygiene/beauty and
+ * general household products (so "papier toilette" or "lessive" work just as
+ * well as "yaourt"). Food results (by far the most common in a grocery list)
+ * are prioritized and restricted to France when possible; the other databases
+ * don't support that filter, but are much smaller and less US-skewed.
  */
 export async function searchProducts(query, { signal } = {}) {
   const trimmed = query?.trim()
   if (!trimmed || trimmed.length < 2) return []
 
-  const franceResults = await runSearch(trimmed, { signal, franceOnly: true, pageSize: 8 })
-  let combined = franceResults
-  if (franceResults.length < 4) {
-    const wider = await runSearch(trimmed, { signal, franceOnly: false, pageSize: 8 })
-    combined = [...franceResults, ...wider]
+  const [foodFrance, householdProducts, beautyProducts] = await Promise.all([
+    searchFood(trimmed, { signal, franceOnly: true, pageSize: 6 }),
+    searchLegacy(trimmed, { signal, host: 'fr.openproductsfacts.org', kind: 'product', pageSize: 4 }),
+    searchLegacy(trimmed, { signal, host: 'fr.openbeautyfacts.org', kind: 'beauty', pageSize: 4 }),
+  ])
+
+  let combined = dedupe([...foodFrance, ...householdProducts, ...beautyProducts])
+
+  if (combined.length < 4) {
+    const wider = await searchFood(trimmed, { signal, franceOnly: false, pageSize: 8 })
+    combined = dedupe([...combined, ...wider])
   }
 
-  return combined.filter(
-    (p, i, arr) => arr.findIndex((x) => x.name.toLowerCase() === p.name.toLowerCase()) === i,
-  ).slice(0, 8)
+  return combined.slice(0, 8)
 }
