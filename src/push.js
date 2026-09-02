@@ -38,3 +38,12 @@ export async function listenForegroundMessages(onMessageReceived) {
   if (!messaging) return () => {}
   return onMessage(messaging, onMessageReceived)
 }
+
+/** Re-reads this device's current FCM token (cheap once already subscribed) — for debugging. */
+export async function getCurrentDeviceToken() {
+  const messaging = await getMessagingIfSupported()
+  if (!messaging) return null
+  const registration = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')
+  if (!registration) return null
+  return getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration })
+}

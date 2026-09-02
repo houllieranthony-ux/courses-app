@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { doc, setDoc } from 'firebase/firestore'
 import { db, HOUSEHOLD_ID } from '../firebase'
 import { useAuth } from '../context/AuthContext'
-import { enablePushNotifications } from '../push'
+import { enablePushNotifications, getCurrentDeviceToken } from '../push'
 import { ALERT_OFFSETS } from './PantryItemModal'
 
 export default function Settings({ defaultOffsets }) {
@@ -12,6 +12,7 @@ export default function Settings({ defaultOffsets }) {
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
   )
   const [busy, setBusy] = useState(false)
+  const [deviceToken, setDeviceToken] = useState(null)
 
   function toggleOffset(days) {
     const next = offsets.includes(days) ? offsets.filter((d) => d !== days) : [...offsets, days].sort((a, b) => b - a)
@@ -48,6 +49,25 @@ export default function Settings({ defaultOffsets }) {
             >
               {busy ? 'Activation…' : 'Activer les notifications'}
             </button>
+          )}
+          {pushStatus === 'granted' && (
+            <div className="space-y-1.5">
+              <button
+                onClick={() => getCurrentDeviceToken().then(setDeviceToken)}
+                className="text-xs text-slate-400 underline"
+              >
+                Afficher le jeton de cet appareil (débogage)
+              </button>
+              {deviceToken && (
+                <textarea
+                  readOnly
+                  value={deviceToken}
+                  onFocus={(e) => e.target.select()}
+                  className="w-full text-xs font-mono bg-slate-50 dark:bg-slate-700 rounded-lg p-2 text-slate-600 dark:text-slate-300"
+                  rows={3}
+                />
+              )}
+            </div>
           )}
         </div>
       </section>
