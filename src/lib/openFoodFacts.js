@@ -2,16 +2,18 @@ import { guessCategory } from './categories'
 
 // Open Food Facts and its sister databases are free, keyless, community-run product
 // databases. We try food first (by far the biggest), then beauty/hygiene, then the
-// catch-all "products" database for everything else (household goods, etc).
+// catch-all "products" database for everything else (household goods, etc). The
+// "fr." subdomain is the same worldwide database, just defaulting to the French
+// language/locale, which matters for search relevance and product names.
 const DATABASES = [
-  { host: 'world.openfoodfacts.org', kind: 'food' },
-  { host: 'world.openbeautyfacts.org', kind: 'beauty' },
-  { host: 'world.openproductsfacts.org', kind: 'product' },
+  { host: 'fr.openfoodfacts.org', kind: 'food' },
+  { host: 'fr.openbeautyfacts.org', kind: 'beauty' },
+  { host: 'fr.openproductsfacts.org', kind: 'product' },
 ]
 
 function normalizeProduct(raw, kind) {
   if (!raw) return null
-  const name = raw.product_name || raw.product_name_fr || raw.generic_name
+  const name = raw.product_name_fr || raw.product_name || raw.generic_name_fr || raw.generic_name
   if (!name) return null
   return {
     barcode: raw.code,
@@ -48,25 +50,45 @@ export async function lookupBarcode(barcode) {
   return null
 }
 
-/**
- * Free-text search for autocomplete suggestions, food database only (by far the
- * most useful for a grocery list, and the fastest of the three).
- */
-export async function searchProducts(query, { signal } = {}) {
-  if (!query || query.trim().length < 2) return []
-  const url = new URL('https://world.openfoodfacts.org/cgi/search.pl')
-  url.searchParams.set('search_terms', query.trim())
-  url.searchParams.set('search_simple', '1')
-  url.searchParams.set('action', 'process')
-  url.searchParams.set('json', '1')
-  url.searchParams.set('page_size', '8')
-  url.searchParams.set('fields', 'product_name,product_name_fr,brands,image_front_small_url,categories_tags,code')
+const SEARCH_FIELDS = 'code,product_name,product_name_fr,brands,image_front_small_url,categories_tags'
+
+// Open Food Facts' newer search engine (search-a-licious). Unlike the legacy
+// cgi/search.pl, it supports proper structured filters, which is what lets us
+// restrict results to products actually sold in France.
+async function runSearch(query, { signal, franceOnly, pageSize }) {
+  const url = new URL('https://search.openfoodfacts.org/search')
+  const q = franceOnly ? `${query} countries_tags:"en:france"` : query
+  url.searchParams.set('q', q)
+  url.searchParams.set('page_size', String(pageSize))
+  url.searchParams.set('fields', SEARCH_FIELDS)
+  // Most-scanned first, so well-known brands outrank obscure one-off entries
+  // with the same word in their name.
+  url.searchParams.set('sort_by', '-unique_scans_n')
 
   const res = await fetch(url, { signal })
   if (!res.ok) return []
   const data = await res.json()
-  return (data.products || [])
-    .map((p) => normalizeProduct(p, 'food'))
-    .filter(Boolean)
-    .filter((p, i, arr) => arr.findIndex((x) => x.name.toLowerCase() === p.name.toLowerCase()) === i)
+  return (data.hits || []).map((p) => normalizeProduct(p, 'food')).filter(Boolean)
+}
+
+/**
+ * Free-text search for autocomplete suggestions, food database only (by far the
+ * most useful for a grocery list, and the fastest of the three). Prioritizes
+ * products sold in France; falls back to the wider database only if that's not
+ * enough results, so a couple in France doesn't drown in US-only products.
+ */
+export async function searchProducts(query, { signal } = {}) {
+  const trimmed = query?.trim()
+  if (!trimmed || trimmed.length < 2) return []
+
+  const franceResults = await runSearch(trimmed, { signal, franceOnly: true, pageSize: 8 })
+  let combined = franceResults
+  if (franceResults.length < 4) {
+    const wider = await runSearch(trimmed, { signal, franceOnly: false, pageSize: 8 })
+    combined = [...franceResults, ...wider]
+  }
+
+  return combined.filter(
+    (p, i, arr) => arr.findIndex((x) => x.name.toLowerCase() === p.name.toLowerCase()) === i,
+  ).slice(0, 8)
 }
