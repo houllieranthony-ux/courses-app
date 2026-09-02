@@ -1,4 +1,4 @@
-import { collection, getDocs } from 'firebase/firestore'
+import { arrayRemove, collection, getDocs, updateDoc } from 'firebase/firestore'
 import { db, HOUSEHOLD_ID } from './firebase'
 
 const WORKER_URL = import.meta.env.VITE_NOTIFY_WORKER_URL
@@ -13,9 +13,8 @@ export async function sendShoppingSignal(user, type) {
   if (!WORKER_URL) return { ok: false, reason: 'not-configured' }
 
   const membersSnap = await getDocs(collection(db, `households/${HOUSEHOLD_ID}/members`))
-  const tokens = membersSnap.docs
-    .filter((d) => d.id !== user.uid)
-    .flatMap((d) => d.data().fcmTokens || [])
+  const recipients = membersSnap.docs.filter((d) => d.id !== user.uid)
+  const tokens = recipients.flatMap((d) => d.data().fcmTokens || [])
 
   if (tokens.length === 0) return { ok: false, reason: 'no-recipient' }
 
@@ -28,5 +27,23 @@ export async function sendShoppingSignal(user, type) {
   })
   if (!res.ok) return { ok: false, reason: 'request-failed' }
   const data = await res.json()
+
+  if (data.deadTokens?.length > 0) {
+    await pruneDeadTokens(recipients, data.deadTokens)
+  }
+
   return { ok: data.sent > 0, sent: data.sent, total: data.total }
+}
+
+// A token stops working when its service worker registration is replaced
+// (browser update, PWA reinstall...) but nothing ever removes it from
+// Firestore on its own — left unchecked it just keeps failing forever.
+async function pruneDeadTokens(recipients, deadTokens) {
+  await Promise.all(
+    recipients.map((docSnap) => {
+      const present = (docSnap.data().fcmTokens || []).filter((t) => deadTokens.includes(t))
+      if (present.length === 0) return null
+      return updateDoc(docSnap.ref, { fcmTokens: arrayRemove(...present) })
+    }),
+  )
 }

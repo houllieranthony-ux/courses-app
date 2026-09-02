@@ -47,12 +47,14 @@ export default {
     if (!idToken || !Array.isArray(tokens) || tokens.length === 0 || !MESSAGES[type]) {
       return json({ error: 'missing idToken, tokens[] or valid type' }, 400, corsHeaders)
     }
+    console.log(`request: type=${type} tokens=${tokens.length}`)
 
     const serviceAccount = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON)
 
     try {
       await verifyFirebaseIdToken(idToken, serviceAccount.project_id)
     } catch (e) {
+      console.log('id token rejected:', e.message)
       return json({ error: 'invalid id token: ' + e.message }, 401, corsHeaders)
     }
 
@@ -62,9 +64,15 @@ export default {
     const results = await Promise.all(
       tokens.map((token) => sendFcmMessage(accessToken, serviceAccount.project_id, token, title, messageBody)),
     )
-    const sent = results.filter(Boolean).length
+    const sent = results.filter((r) => r.ok).length
+    // Tokens survive a service worker being re-registered (browser update,
+    // reinstall...) as stale entries in Firestore forever unless something
+    // prunes them. Hand the dead ones back so the client can clean them up —
+    // it already has write access to every member's token list.
+    const deadTokens = tokens.filter((_, i) => !results[i].ok && results[i].detail.includes('UNREGISTERED'))
+    console.log('results:', JSON.stringify(results.map((r) => ({ ok: r.ok, detail: r.detail }))))
 
-    return json({ sent, total: tokens.length }, 200, corsHeaders)
+    return json({ sent, total: tokens.length, deadTokens }, 200, corsHeaders)
   },
 }
 
@@ -219,5 +227,6 @@ async function sendFcmMessage(accessToken, projectId, token, title, body) {
       },
     }),
   })
-  return res.ok
+  const detail = res.ok ? 'sent' : await res.text()
+  return { ok: res.ok, detail: detail.slice(0, 300) }
 }
