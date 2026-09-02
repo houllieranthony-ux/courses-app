@@ -1,4 +1,4 @@
-import { arrayRemove, collection, getDocs, updateDoc } from 'firebase/firestore'
+import { collection, deleteField, getDocs, updateDoc } from 'firebase/firestore'
 import { db, HOUSEHOLD_ID } from './firebase'
 
 const WORKER_URL = import.meta.env.VITE_NOTIFY_WORKER_URL
@@ -14,7 +14,7 @@ export async function sendShoppingSignal(user, type) {
 
   const membersSnap = await getDocs(collection(db, `households/${HOUSEHOLD_ID}/members`))
   const recipients = membersSnap.docs.filter((d) => d.id !== user.uid)
-  const tokens = recipients.flatMap((d) => d.data().fcmTokens || [])
+  const tokens = recipients.flatMap((d) => Object.values(d.data().fcmTokensByDevice || {}))
 
   if (tokens.length === 0) return { ok: false, reason: 'no-recipient' }
 
@@ -41,9 +41,11 @@ export async function sendShoppingSignal(user, type) {
 async function pruneDeadTokens(recipients, deadTokens) {
   await Promise.all(
     recipients.map((docSnap) => {
-      const present = (docSnap.data().fcmTokens || []).filter((t) => deadTokens.includes(t))
-      if (present.length === 0) return null
-      return updateDoc(docSnap.ref, { fcmTokens: arrayRemove(...present) })
+      const byDevice = docSnap.data().fcmTokensByDevice || {}
+      const deadDeviceIds = Object.keys(byDevice).filter((deviceId) => deadTokens.includes(byDevice[deviceId]))
+      if (deadDeviceIds.length === 0) return null
+      const updates = Object.fromEntries(deadDeviceIds.map((id) => [`fcmTokensByDevice.${id}`, deleteField()]))
+      return updateDoc(docSnap.ref, updates)
     }),
   )
 }
