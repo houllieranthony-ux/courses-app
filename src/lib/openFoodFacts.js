@@ -6,9 +6,9 @@ import { guessCategory } from './categories'
 // "fr." subdomain is the same worldwide database, just defaulting to the French
 // language/locale, which matters for search relevance and product names.
 const DATABASES = [
-  { host: 'fr.openfoodfacts.org', kind: 'food' },
-  { host: 'fr.openbeautyfacts.org', kind: 'beauty' },
-  { host: 'fr.openproductsfacts.org', kind: 'product' },
+  { host: 'world.openfoodfacts.org', kind: 'food' },
+  { host: 'world.openbeautyfacts.org', kind: 'beauty' },
+  { host: 'world.openproductsfacts.org', kind: 'product' },
 ]
 
 function normalizeProduct(raw, kind) {
@@ -50,43 +50,49 @@ export async function lookupBarcode(barcode) {
   return null
 }
 
-const SEARCH_FIELDS = 'code,product_name,product_name_fr,brands,image_front_small_url,categories_tags'
-
-// Open Food Facts' newer search engine (search-a-licious). Unlike the legacy
-// cgi/search.pl, it supports proper structured filters, which is what lets us
-// restrict results to products actually sold in France. Only the food database
-// has this newer engine; beauty/products still use the legacy one below.
-async function searchFood(query, { signal, franceOnly, pageSize }) {
-  const url = new URL('https://search.openfoodfacts.org/search')
-  const q = franceOnly ? `${query} countries_tags:"en:france"` : query
-  url.searchParams.set('q', q)
-  url.searchParams.set('page_size', String(pageSize))
-  url.searchParams.set('fields', SEARCH_FIELDS)
-  // Most-scanned first, so well-known brands outrank obscure one-off entries
-  // with the same word in their name.
-  url.searchParams.set('sort_by', '-unique_scans_n')
-
-  const res = await fetch(url, { signal })
-  if (!res.ok) return []
-  const data = await res.json()
-  return (data.hits || []).map((p) => normalizeProduct(p, 'food')).filter(Boolean)
-}
-
-// Legacy search endpoint, used for the beauty/hygiene and general "products"
-// (household, non-food) databases, which don't have the newer search engine.
-async function searchLegacy(query, { signal, host, kind, pageSize }) {
+// The newer search-a-licious engine (search.openfoodfacts.org) has no CORS
+// headers, so browsers silently block it — it only works from a server. We
+// stick to the legacy cgi/search.pl everywhere, which does send
+// "Access-Control-Allow-Origin: *", but that free community server is prone
+// to occasional 503s under its own load — worth one quick retry — so ranking
+// (France-first, most-scanned) is done client-side over a modest page of raw
+// results rather than relying on the endpoint's own (also flaky) sort_by.
+async function searchLegacy(query, { signal, host, pageSize, fields, retried }) {
   const url = new URL(`https://${host}/cgi/search.pl`)
   url.searchParams.set('search_terms', query)
   url.searchParams.set('search_simple', '1')
   url.searchParams.set('action', 'process')
   url.searchParams.set('json', '1')
   url.searchParams.set('page_size', String(pageSize))
-  url.searchParams.set('fields', 'product_name,brands,image_front_small_url,categories_tags,code')
+  url.searchParams.set('fields', fields)
 
   const res = await fetch(url, { signal })
-  if (!res.ok) return []
+  if (!res.ok) {
+    if (!retried && res.status >= 500) {
+      return searchLegacy(query, { signal, host, pageSize, fields, retried: true })
+    }
+    return []
+  }
   const data = await res.json()
-  return (data.products || []).map((p) => normalizeProduct(p, kind)).filter(Boolean)
+  return data.products || []
+}
+
+async function searchFood(query, { signal, pageSize }) {
+  const raw = await searchLegacy(query, {
+    signal,
+    host: 'world.openfoodfacts.org',
+    pageSize,
+    fields: 'product_name,product_name_fr,brands,image_front_small_url,categories_tags,code,countries_tags,unique_scans_n',
+  })
+
+  const ranked = raw.sort((a, b) => {
+    const aFrance = a.countries_tags?.includes('en:france') ? 1 : 0
+    const bFrance = b.countries_tags?.includes('en:france') ? 1 : 0
+    if (aFrance !== bFrance) return bFrance - aFrance
+    return (b.unique_scans_n || 0) - (a.unique_scans_n || 0)
+  })
+
+  return ranked.map((p) => normalizeProduct(p, 'food')).filter(Boolean)
 }
 
 function dedupe(products) {
@@ -95,29 +101,49 @@ function dedupe(products) {
   )
 }
 
+// Runs one promise, swallowing any failure into an empty list — one database
+// having a hiccup shouldn't blank out the others.
+async function settled(promise) {
+  try {
+    return await promise
+  } catch {
+    return []
+  }
+}
+
+const NON_FOOD_FIELDS = 'product_name,brands,image_front_small_url,categories_tags,code'
+
 /**
  * Free-text search for autocomplete suggestions across food, hygiene/beauty and
  * general household products (so "papier toilette" or "lessive" work just as
- * well as "yaourt"). Food results (by far the most common in a grocery list)
- * are prioritized and restricted to France when possible; the other databases
- * don't support that filter, but are much smaller and less US-skewed.
+ * well as "yaourt"). Food results (by far the most common in a grocery list,
+ * and also the noisiest — its DB has some non-food items miscategorized in it)
+ * are prioritized and ranked to favor products actually sold in France, but
+ * capped so a handful of household/hygiene slots always survive rather than
+ * being crowded out by food matches.
  */
 export async function searchProducts(query, { signal } = {}) {
   const trimmed = query?.trim()
   if (!trimmed || trimmed.length < 2) return []
 
-  const [foodFrance, householdProducts, beautyProducts] = await Promise.all([
-    searchFood(trimmed, { signal, franceOnly: true, pageSize: 6 }),
-    searchLegacy(trimmed, { signal, host: 'fr.openproductsfacts.org', kind: 'product', pageSize: 4 }),
-    searchLegacy(trimmed, { signal, host: 'fr.openbeautyfacts.org', kind: 'beauty', pageSize: 4 }),
+  const [food, product, beauty] = await Promise.all([
+    settled(searchFood(trimmed, { signal, pageSize: 12 })),
+    settled(
+      searchLegacy(trimmed, { signal, host: 'world.openproductsfacts.org', pageSize: 4, fields: NON_FOOD_FIELDS }).then(
+        (raw) => raw.map((p) => normalizeProduct(p, 'product')).filter(Boolean),
+      ),
+    ),
+    settled(
+      searchLegacy(trimmed, { signal, host: 'world.openbeautyfacts.org', pageSize: 4, fields: NON_FOOD_FIELDS }).then(
+        (raw) => raw.map((p) => normalizeProduct(p, 'beauty')).filter(Boolean),
+      ),
+    ),
   ])
 
-  let combined = dedupe([...foodFrance, ...householdProducts, ...beautyProducts])
-
-  if (combined.length < 4) {
-    const wider = await searchFood(trimmed, { signal, franceOnly: false, pageSize: 8 })
-    combined = dedupe([...combined, ...wider])
+  const nonFood = dedupe([...product, ...beauty])
+  let combined = dedupe([...food.slice(0, 5), ...nonFood.slice(0, 3)])
+  if (combined.length < 8) {
+    combined = dedupe([...combined, ...nonFood.slice(3), ...food.slice(5)])
   }
-
   return combined.slice(0, 8)
 }
