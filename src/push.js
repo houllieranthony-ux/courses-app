@@ -5,11 +5,12 @@ import { db, HOUSEHOLD_ID, VAPID_KEY, getMessagingIfSupported } from './firebase
 /**
  * Ask for notification permission and register this device's FCM token under
  * the signed-in user, so both the daily GitHub Actions job and the shopping
- * signal can push to it. Stored as one token per device (a stable random id
- * kept in localStorage), not appended forever — re-enabling on the same
- * device (a reinstalled PWA, a browser update...) replaces its own old
- * token instead of piling up a second, still-technically-valid one next to
- * it, which was causing duplicate notifications on the same phone.
+ * signal can push to it. Fully REPLACES any previous token for this person
+ * (not appended, not keyed by device) — a per-device id in localStorage was
+ * tried first, but a reinstalled PWA wipes localStorage too, so it just
+ * grew a fresh "device" each time and duplicated every notification. Each
+ * of you uses one phone for this app, so one token per person is correct
+ * and, unlike the per-device approach, self-heals on every reinstall.
  */
 export async function enablePushNotifications(user) {
   if (!user) return { ok: false, reason: 'not-signed-in' }
@@ -30,21 +31,11 @@ export async function enablePushNotifications(user) {
 
   await setDoc(
     doc(db, `households/${HOUSEHOLD_ID}/members/${user.uid}`),
-    { fcmTokensByDevice: { [getDeviceId()]: token }, email: user.email },
+    { fcmToken: token, email: user.email },
     { merge: true },
   )
 
   return { ok: true, token }
-}
-
-function getDeviceId() {
-  const key = 'device-id'
-  let id = localStorage.getItem(key)
-  if (!id) {
-    id = crypto.randomUUID()
-    localStorage.setItem(key, id)
-  }
-  return id
 }
 
 /** Foreground push handler (app open) — shows a small in-app toast via callback. */

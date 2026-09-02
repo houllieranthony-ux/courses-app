@@ -4,7 +4,7 @@ import { db, HOUSEHOLD_ID } from './firebase'
 const WORKER_URL = import.meta.env.VITE_NOTIFY_WORKER_URL
 
 /**
- * Pings the other household member's phone(s) with a push notification —
+ * Pings the other household member's phone with a push notification —
  * "heading to the store" or "done, checking out". Relayed through a small
  * Cloudflare Worker (see worker/) since the browser can neither call FCM
  * directly (no CORS) nor hold the credentials to do so itself.
@@ -14,7 +14,7 @@ export async function sendShoppingSignal(user, type) {
 
   const membersSnap = await getDocs(collection(db, `households/${HOUSEHOLD_ID}/members`))
   const recipients = membersSnap.docs.filter((d) => d.id !== user.uid)
-  const tokens = recipients.flatMap((d) => Object.values(d.data().fcmTokensByDevice || {}))
+  const tokens = recipients.map((d) => d.data().fcmToken).filter(Boolean)
 
   if (tokens.length === 0) return { ok: false, reason: 'no-recipient' }
 
@@ -40,12 +40,8 @@ export async function sendShoppingSignal(user, type) {
 // Firestore on its own — left unchecked it just keeps failing forever.
 async function pruneDeadTokens(recipients, deadTokens) {
   await Promise.all(
-    recipients.map((docSnap) => {
-      const byDevice = docSnap.data().fcmTokensByDevice || {}
-      const deadDeviceIds = Object.keys(byDevice).filter((deviceId) => deadTokens.includes(byDevice[deviceId]))
-      if (deadDeviceIds.length === 0) return null
-      const updates = Object.fromEntries(deadDeviceIds.map((id) => [`fcmTokensByDevice.${id}`, deleteField()]))
-      return updateDoc(docSnap.ref, updates)
-    }),
+    recipients
+      .filter((docSnap) => deadTokens.includes(docSnap.data().fcmToken))
+      .map((docSnap) => updateDoc(docSnap.ref, { fcmToken: deleteField() })),
   )
 }

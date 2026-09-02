@@ -26,7 +26,7 @@ function daysUntil(dateISO) {
 async function main() {
   const today = todayISO()
   const membersSnap = await db.collection(`households/${HOUSEHOLD_ID}/members`).get()
-  const tokens = membersSnap.docs.flatMap((d) => Object.values(d.data().fcmTokensByDevice || {}))
+  const tokens = membersSnap.docs.map((d) => d.data().fcmToken).filter(Boolean)
 
   if (tokens.length === 0) {
     console.log('Aucun appareil enregistré pour les notifications, rien à faire.')
@@ -94,11 +94,8 @@ async function pruneInvalidTokens(membersSnap, tokens, response) {
   if (deadTokens.length === 0) return
 
   for (const memberDoc of membersSnap.docs) {
-    const byDevice = memberDoc.data().fcmTokensByDevice || {}
-    const deadDeviceIds = Object.keys(byDevice).filter((deviceId) => deadTokens.includes(byDevice[deviceId]))
-    if (deadDeviceIds.length > 0) {
-      const updates = Object.fromEntries(deadDeviceIds.map((id) => [`fcmTokensByDevice.${id}`, FieldValue.delete()]))
-      await memberDoc.ref.update(updates)
+    if (deadTokens.includes(memberDoc.data().fcmToken)) {
+      await memberDoc.ref.update({ fcmToken: FieldValue.delete() })
     }
   }
 }
