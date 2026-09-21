@@ -27,6 +27,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // The push worker is its own registration (see src/push.js): don't let
+        // Workbox precache/serve a copy of it.
+        globIgnores: ['firebase-messaging-sw.js'],
         navigateFallbackDenylist: [/^\/firebase-messaging-sw\.js$/],
       },
       // firebase-messaging-sw.js is served separately (not injected by workbox)

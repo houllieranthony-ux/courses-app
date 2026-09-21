@@ -14,7 +14,7 @@ import { useAuth } from './context/AuthContext'
 import { useCollection } from './hooks/useCollection'
 import { useDoc } from './hooks/useDoc'
 import { guessCategory } from './lib/categories'
-import { listenForegroundMessages } from './push'
+import { listenForegroundMessages, syncPushTokenIfGranted } from './push'
 import Login from './components/Login'
 import AddItemBar from './components/AddItemBar'
 import ShoppingSignalBar from './components/ShoppingSignalBar'
@@ -44,9 +44,14 @@ function SplashScreen() {
 }
 
 function Home() {
+  const { user } = useAuth()
   const [tab, setTab] = useState('list')
   const [pendingPantryItem, setPendingPantryItem] = useState(null)
   const [toast, setToast] = useState(null)
+
+  useEffect(() => {
+    syncPushTokenIfGranted(user)
+  }, [user])
 
   useEffect(() => {
     let unsubscribe = () => {}

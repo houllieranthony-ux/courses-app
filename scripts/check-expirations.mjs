@@ -56,6 +56,7 @@ async function main() {
 
     if (newlyNotified.length === 0) continue
 
+    const delivered = []
     for (const offset of newlyNotified) {
       const body =
         remaining < 0
@@ -76,12 +77,19 @@ async function main() {
         },
       })
       sent += response.successCount
+      if (response.successCount > 0) delivered.push(offset)
+      else console.log(`Échec d'envoi pour "${item.name}" (alerte ${offset} j), nouvel essai demain.`)
       await pruneInvalidTokens(membersSnap, tokens, response)
     }
 
-    await docSnap.ref.update({
-      notifiedOffsets: FieldValue.arrayUnion(...newlyNotified),
-    })
+    // Only mark an alert as done once at least one device actually received
+    // it — otherwise a single bad day (dead token, no device yet) would eat
+    // the alert for good instead of retrying at the next run.
+    if (delivered.length > 0) {
+      await docSnap.ref.update({
+        notifiedOffsets: FieldValue.arrayUnion(...delivered),
+      })
+    }
   }
 
   console.log(`Terminé : ${sent} notification(s) envoyée(s).`)
